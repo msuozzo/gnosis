@@ -32,18 +32,37 @@ class Gnosis(object):
         self._start_date = self._get_date(Gnosis.DATA_START_ROW)
         self._end_date = self._get_date(self._sheet.row_count)
 
-    def _get_date(self, row):
-        """Retrieve the date represented by `row`
-
-        Return:
-            a `date` instance
+    @staticmethod
+    def _parse_date(date_str):
+        """Return a `datetime.date` instance from a Gnosis-formatted date
+        string.
         """
-        date_str = self._sheet.cell(row, Gnosis.LABEL_COL).value
         try:
             return datetime.strptime(date_str, Gnosis.TIME_FMT).date()
         except ValueError:
             #TODO: Raise custom error
             raise
+
+    def _get_date(self, row):
+        """Retrieve the date represented by `row`
+        WARNING: Triggers an API HTTP request -> SLOW!!
+
+        Return:
+            a `date` instance
+        """
+        date_str = self._sheet.cell(row, Gnosis.LABEL_COL).value
+        return Gnosis._parse_date(date_str)
+
+    def _get_approx_date(self, row):
+        """Guesses at the date represented by `row` based on its offset from
+        the start date.
+
+        This should be preferred over Gnosis._get_approx_date
+
+        Return:
+            a `date` instance
+        """
+        return self._start_date + timedelta(days=row - Gnosis.DATA_START_ROW)
 
     def _get_row(self, a_date):
         """Return the row index associated with the date `a_date`
@@ -179,6 +198,16 @@ class Gnosis(object):
         start_date, _ = next(self._stat_iter(stat_name))
         return start_date
 
+    def _row_values(self, row):
+        start = self._sheet.get_addr_int(row, 1)
+        end = self._sheet.get_addr_int(row, self._sheet.col_count)
+        return [cell.value for cell in self._sheet.range('%s:%s' % (start, end))]
+
+    def _col_values(self, col):
+        start = self._sheet.get_addr_int(1, col)
+        end = self._sheet.get_addr_int(self._sheet.row_count, col)
+        return [cell.value for cell in self._sheet.range('%s:%s' % (start, end))]
+
     def _row_iter(self, row):
         """Return an iterator over the values in row `row`
 
@@ -188,7 +217,7 @@ class Gnosis(object):
         Returns:
             A generator yielding 2-tuples of (col_num, cell_val)
         """
-        cell_values = self._sheet.row_values(row)
+        cell_values = self._row_values(row)
         for row, cell_value in enumerate(cell_values, start=1):
             yield (row, cell_value)
 
@@ -201,7 +230,7 @@ class Gnosis(object):
         Returns:
             A generator yielding 2-tuples of (row_num, cell_val)
         """
-        cell_values = self._sheet.col_values(col)
+        cell_values = self._col_values(col)
         for row, cell_value in enumerate(cell_values, start=1):
             yield (row, cell_value)
 
@@ -216,6 +245,6 @@ class Gnosis(object):
         has_started = False
         stat_col = self._get_stat_col(stat_name)
         for row, cell in self._col_iter(stat_col):
-            has_started = has_started or cell == self.INITIALIZER
             if has_started:
-                yield (self._get_date(row), cell)
+                yield (self._get_approx_date(row), cell)
+            has_started = has_started or cell == self.INITIALIZER
