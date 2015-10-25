@@ -52,6 +52,66 @@ class Gnosis(object):
         """
         return date.strftime(a_date, Gnosis.TIME_FMT)
 
+    def fix_labels(self):
+        """Fix the date labels of the Gnosis sheet.
+
+        The method used to correct the labels is to find the longest run of
+        valid date labels and modify all surrounding labels to conform to this
+        run's sequence.
+        """
+        # These tuples track the current and longest runs of valid date
+        # strings. This is stored in the form (start_row, start_date, length)
+        #
+        # We store the start_date so we can save an HTTP request later in the
+        # function when we need this date.
+        longest_run = (0, None, 0)
+        current_run = (0, None, 0)
+        for row_ind, date_str in self._col_iter(self.LABEL_COL):
+            if row_ind <= Gnosis.DATA_START_ROW:
+                continue
+            try:
+                current_date = Gnosis._parse_date(date_str)
+            except ValueError:
+                if current_run[2] > longest_run[2]:
+                    longest_run = current_run
+                current_run = (0, None, 0)
+            else:
+                if not current_run[2]:
+                    current_run[0] = row_ind
+                    current_run[1] = current_date
+                current_run[2] += 1
+
+        # First, correct all labels before the longest sequence
+        rows_to_correct = longest_run[0] - Gnosis.DATA_START_ROW
+        # Reversed because we want the furthest offsets to be at the start of
+        # the sequence.
+        offset_iter = reversed(timedelta(days=i)
+                               for i in xrange(1, rows_to_correct))
+        bad_labels_addr = 'A%d:A%d' % (Gnosis.DATA_START_ROW, longest_run[0])
+        bad_label_cells = self._sheet.range(bad_labels_addr)
+
+        start_date = longest_run[1]
+        for cell, offset in zip(bad_label_cells, offset_iter):
+            date_str = Gnosis._to_date_str(start_date - offset)
+            cell.value = date_str
+
+        self._sheet.update_cells(bad_label_cells)
+
+        # Correct all labels after the longest sequence
+        last_correct_row = longest_run[0] + longest_run[2] - 1
+        rows_to_correct = self._sheet.row_count - last_correct_row
+
+        offset_iter = (timedelta(days=i) for i in xrange(1, rows_to_correct))
+        bad_labels_addr = 'A%d:A%d' % (last_correct_row, self._sheet.row_count)
+        bad_label_cells = self._sheet.range(bad_labels_addr)
+
+        end_date = longest_run[1] + timedelta(days=longest_run[2] - 1)
+        for cell, offset in zip(bad_label_cells, offset_iter):
+            date_str = Gnosis._to_date_str(end_date + offset)
+            cell.value = date_str
+
+        self._sheet.update_cells(bad_label_cells)
+
     def _get_date(self, row):
         """Retrieve the date represented by `row`
         WARNING: Triggers an API HTTP request -> SLOW!!
@@ -120,7 +180,8 @@ class Gnosis(object):
                 new_cells = self._sheet.range(new_cells_addr)
 
                 for ind, offset in enumerate(offset_iter):
-                    new_cells[ind].value = closest_date + offset
+                    date_str = Gnosis._to_date_str(closest_date + offset)
+                    new_cells[ind].value = date_str
                 self._sheet.update_cells(new_cells)
 
                 self._end_date = a_date
