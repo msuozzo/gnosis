@@ -1,4 +1,4 @@
-"""
+"""An interface for interaction with a Gnosis spreadsheet
 """
 from api import sheets_api_login
 
@@ -6,7 +6,11 @@ from datetime import datetime, date, timedelta
 
 
 class Gnosis(object):
-    """
+    """Interface for modifying a Gnosis spreadsheet.
+
+    Args:
+        credential_path: Local path to the Google API credentials file.
+        sheet_key: The Base64 identifier for the target Gnosis spreadsheet.
     """
     INITIALIZER = 'START'
     TIME_FMT = '%a, %m/%d/%y'
@@ -26,8 +30,7 @@ class Gnosis(object):
             self._sheet.get_addr_int(Gnosis.LABEL_ROW, self._sheet.col_count))
         label_cells = self._sheet.range(label_range)
         self._stat_to_col = {cell.value: Gnosis.DATA_START_COL + i
-                                for i, cell in
-                                enumerate(label_cells, start=1)}
+                             for i, cell in enumerate(label_cells, start=1)}
 
         self._start_date = self._get_date(Gnosis.DATA_START_ROW)
         self._end_date = self._get_date(self._sheet.row_count)
@@ -42,6 +45,12 @@ class Gnosis(object):
         except ValueError:
             #TODO: Raise custom error
             raise
+
+    @staticmethod
+    def _to_date_str(a_date):
+        """Return a Gnosis-formatted date from a `datetime.date` instance.
+        """
+        return date.strftime(a_date, Gnosis.TIME_FMT)
 
     def _get_date(self, row):
         """Retrieve the date represented by `row`
@@ -92,27 +101,30 @@ class Gnosis(object):
             if rows_to_create > 1000:
                 raise ValueError('Unable to create more than 1000 rows')
 
+            #TODO: Format the added cells as dates?
             offset_iter = (timedelta(days=i)
-                            for i in xrange(1, rows_to_create))
+                           for i in xrange(1, rows_to_create))
             if create_before:
                 #FIXME: Requires a bulk insertion function
                 for offset in offset_iter:
-                    date_str = date.strftime(closest_date - offset,
-                                                    Gnosis.TIME_FMT)
+                    date_str = Gnosis._to_date_str(closest_date - offset)
                     self._sheet.insert_row([date_str], 2)
 
                 self._start_date = a_date
             else:
-                #TODO: Will it format the added cells as dates?
-                base_row = self._sheet.row_count
                 self._sheet.add_rows(rows_to_create)
-                cells = self._sheet.range('A%d:A%d' % (base_row + 1,
-                                                base_row + rows_to_create))
+
+                base_row = self._sheet.row_count
+                new_cells_addr = 'A%d:A%d' % (base_row + 1,
+                                              base_row + rows_to_create)
+                new_cells = self._sheet.range(new_cells_addr)
+
                 for ind, offset in enumerate(offset_iter):
-                    cells[ind].value = closest_date + offset
-                self._sheet.update_cells(cells)
+                    new_cells[ind].value = closest_date + offset
+                self._sheet.update_cells(new_cells)
 
                 self._end_date = a_date
+
             return self._get_row(a_date)
 
     def _trim(self):
@@ -142,7 +154,7 @@ class Gnosis(object):
             raise ValueError
 
     def _get_coords(self, stat_name, a_date):
-        """Return the row and column coordinates og the cell associated with
+        """Return the row and column coordinates of the cell associated with
         stat `stat_name` on date `a_date`
 
         Returns:
@@ -199,11 +211,15 @@ class Gnosis(object):
         return start_date
 
     def _row_values(self, row):
+        """Return a list of the values in the row `row`
+        """
         start = self._sheet.get_addr_int(row, 1)
         end = self._sheet.get_addr_int(row, self._sheet.col_count)
         return [cell.value for cell in self._sheet.range('%s:%s' % (start, end))]
 
     def _col_values(self, col):
+        """Return a list of the values in the column `col`
+        """
         start = self._sheet.get_addr_int(1, col)
         end = self._sheet.get_addr_int(self._sheet.row_count, col)
         return [cell.value for cell in self._sheet.range('%s:%s' % (start, end))]
@@ -222,7 +238,7 @@ class Gnosis(object):
             yield (row, cell_value)
 
     def _col_iter(self, col):
-        """Return an iterator over the values in column`col`
+        """Return an iterator over the values in column `col`
 
         Args:
             col: The index of the column over which to iterate
